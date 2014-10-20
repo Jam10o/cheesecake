@@ -10,6 +10,8 @@
 #include "SoftwareSerial.h"
 #include "EEPROM.h"
 
+#define ROTOR_PIN_1  5
+#define ROTOR_PIN_2  6
 // lots of code borrowed from demot
 #define CMPS10_ADDRESS         0x1E    // I2C address
 #define CMPS10_HEADING_REG     0x01    // Bearing, pitch and roll register
@@ -203,10 +205,31 @@ int turningStuff() {
 
 // end code borrowed from demot
 
-void differentialSteering(int head) {
-}  
+int relhed() {
+int relhed = get_hdg_diff(wp_hdg,data.heading);
+return relhed;
+}
+
+void differentialSteering() { //TODO: this definitely needs testing...
+//turn off rotors if they are being counterproductive, otherwise leave them on.
+int rel = relhed();
+if ((rel > 45) or (rel < 135)){
+digitalWrite(ROTOR_PIN_1,LOW);
+}
+else{
+digitalWrite(ROTOR_PIN_1,HIGH);
+};
+if ((rel < 315) or (rel > 225)){
+digitalWrite(ROTOR_PIN_2,LOW);
+}
+else{
+digitalWrite(ROTOR_PIN_2,HIGH);
+};  
+
+};
 
 void saveStatus() {
+
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -241,45 +264,34 @@ void setup()
   gps_serial.begin(4800); // setups serial communications for the GPS
   unsigned long last_gps_read=0;
   Wire.begin();
+  pinMode(ROTOR_PIN_1,OUTPUT);
+  pinMode(ROTOR_PIN_2,OUTPUT);
 
-
-
-    ///////////////////////////////////////////////////////////////////////////////////
-  /// Here we setup waypoint stuff, these are actually the coordinates of the place
-  /// Dermot was actually meant to race in at WRSC in Galway last summer
-  // start (TODO, change these to the values we need)
-  wp_lats[0] = 53.257804;
-  wp_lons[0] = -9.117945;
-
-  wp_lats[1] = 53.257795;
-  wp_lons[1] = -9.117450;
-
-  wp_lats[2] = 53.257805;
-  wp_lons[2] = -9.117440;
-
-  wp_lats[3] = 53.257918;
-  wp_lons[3] = -9.117673;
-
-  wp_lats[4] = 53.257928;
-  wp_lons[4] = -9.117683;
-
-  wp_lats[5] = 53.257814;
-  wp_lons[5] = -9.117955;
-
-  wp_lats[6] = 53.257805;
-  wp_lons[6] = -9.117440;
-  // End / Home
-  wp_lats[7] = 53.25851;
-  wp_lons[7] = -9.11918;
-  ///////////////////////////////////////////////////////////////////////////////////
-
+  for (int i = 0; i < NUM_OF_WAYPOINTS; i++){
+    Serial.println("Please enter the latitude of waypoint");
+    Serial.print(i+1);
+  while (!Serial.available()) {
+   //doesn't continue until serial is available
+  }
+  
+  wp_lats[i] = Serial.parseFloat();
+  Serial.println();
+  Serial.println("Please enter the longitude of waypoint");
+  Serial.print(i+1);
+	while (!Serial.available()) {
+   //doesn't continue until serial is available
+  ;
+  }
+  
+ wp_lons[i] = Serial.parseFloat();
+ }
 }
 
 void loop()
 {
   orientationStuff();
   data.heading = turningStuff();
-  differentialSteering(data.heading);
+  differentialSteering();
   saveStatus();
 }
 
