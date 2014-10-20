@@ -268,16 +268,16 @@ void setup()
   pinMode(ROTOR_PIN_2,OUTPUT);
 
   for (int i = 0; i < NUM_OF_WAYPOINTS; i++){
-    Serial.println("Please enter the latitude of waypoint");
-    Serial.print(i+1);
+    Serial.print("Please enter the latitude of waypoint");
+    Serial.println(i+1);
   while (!Serial.available()) {
    //doesn't continue until serial is available
   }
   
   wp_lats[i] = Serial.parseFloat();
   Serial.println();
-  Serial.println("Please enter the longitude of waypoint");
-  Serial.print(i+1);
+  Serial.print("Please enter the longitude of waypoint");
+  Serial.println(i+1);
 	while (!Serial.available()) {
    //doesn't continue until serial is available
   ;
