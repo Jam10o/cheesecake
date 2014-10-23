@@ -10,6 +10,8 @@
 #include "SoftwareSerial.h"
 #include "EEPROM.h"
 
+#define GPS //gps
+//#define COM //compass
 #define DEBUG
 #define DATA_PROMPT
 //#define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
@@ -114,7 +116,7 @@ int get_hdg_diff(int heading1,int heading2)
   return result;
 }
 
-
+#ifdef GPS
 // got rid of a bunch of debug stuff so this is likely to be buggy and broken :)
 void readGPS() {
   unsigned long fix_age=9999,time,date;
@@ -155,6 +157,7 @@ void readGPS() {
 
 }
 
+
 void orientationStuff() {
   //blatant pull of waypoint logic from demot makes me sad... but it looks like it works fine...
   wp_hdg = (int) gps.course_to(data.lat, data.lon, wp_lats[wp_num],wp_lons[wp_num]);
@@ -177,9 +180,10 @@ void orientationStuff() {
     }
   }
 }
+#endif
 
 // merged compass-readings and rudder-turning because it will make later things simpler
-
+#ifdef COM
 int turningStuff() {
   byte msb, lsb;
 
@@ -227,7 +231,7 @@ int turningStuff() {
   //turn the rudder after the math stuff
   rudderServo.writeMicroseconds(1500+(data.rudder*100));
 };
-
+#endif
 
 // end code borrowed from demot
 
@@ -324,8 +328,12 @@ void setup()
 
 void loop()
 {
+#ifdef GPS
   orientationStuff();
+#endif 
+#ifdef COM
   data.heading = turningStuff();
+#endif
   differentialSteering();
   saveStatus();
 #ifdef DEBUG
