@@ -40,8 +40,7 @@ float igain=0.01;
 float pgain=0.1;
 float running_err=0.0;
 int hdg_err=0;
-SoftwareSerial gps_serial(11, 12);  // Creates a serial object which allows us to read serial data from pin 11 and write serial data 
-// using pin 12.
+SoftwareSerial gps_serial(11, 12);  // Creates a serial object which allows us to read serial data from pin 11 and write on 12
 struct Data{
   uint16_t heading;
   int8_t rudder;
