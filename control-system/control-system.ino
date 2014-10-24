@@ -10,11 +10,13 @@
 #include "SoftwareSerial.h"
 #include "EEPROM.h"
 
+#define SER //servo (rudder)
+#define ROT //rotors
 #define GPS //gps
-//#define COM //compass
+#define COM //compass
 #define DEBUG
-#define DATA_PROMPT
-//#define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
+//#define DATA_PROMPT
+#define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
 #define ROTOR_PIN_1  5
 #define ROTOR_PIN_2  6
 // lots of code borrowed from demot
@@ -26,33 +28,6 @@
 #define WP_THRESHOLD 10
 float wp_lats[NUM_OF_WAYPOINTS]; 
 float wp_lons[NUM_OF_WAYPOINTS];
-
-#ifdef DATA_PREWRITTEN
-  wp_lats[0] = 0.0;
-  wp_lons[0] = 0.0;
-
-  wp_lats[1] = 0.0;
-  wp_lons[1] = 0.0;
-
-  wp_lats[2] = 0.0;
-  wp_lons[2] = 0.0;
-
-  wp_lats[3] = 0.0;
-  wp_lons[3] = 0.0;
-
-  wp_lats[4] = 0.0;
-  wp_lons[4] = 0.0;
-
-  wp_lats[5] = 0.0;
-  wp_lons[5] = 0.0;
-
-  wp_lats[6] = 0.0;
-  wp_lons[6] = 0.0;
-
-  wp_lats[7]= 0.0;
-  wp_lons[7]= 0.0;
-#endif
-
 
 TinyGPS gps;
 //
@@ -229,7 +204,9 @@ int turningStuff() {
     data.rudder=5;
   }
   //turn the rudder after the math stuff
+#ifdef SER
   rudderServo.writeMicroseconds(1500+(data.rudder*100));
+#endif
 };
 #endif
 
@@ -323,6 +300,33 @@ void setup()
  }
 #endif
 
+#ifdef DATA_PREWRITTEN
+wp_lats[0] = 0.0;
+wp_lons[0] = 0.0;
+
+wp_lats[1] = 0.0;
+wp_lons[1] = 0.0;
+
+wp_lats[2] = 0.0;
+wp_lons[2] = 0.0;
+
+wp_lats[3] = 0.0;
+wp_lons[3] = 0.0;
+
+wp_lats[4] = 0.0;
+wp_lons[4] = 0.0;
+
+wp_lats[5] = 0.0;
+wp_lons[5] = 0.0;
+
+wp_lats[6] = 0.0;
+wp_lons[6] = 0.0;
+
+wp_lats[7] = 0.0;
+wp_lons[7] = 0.0;
+#endif
+
+
 
 }
 
@@ -334,7 +338,9 @@ void loop()
 #ifdef COM
   data.heading = turningStuff();
 #endif
+#ifdef ROT
   differentialSteering();
+#endif
   saveStatus();
 #ifdef DEBUG
   delay(900);
