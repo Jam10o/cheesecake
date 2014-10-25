@@ -9,18 +9,18 @@
 #include "SoftwareSerial.h"
 #include "EEPROM.h"
 
-//#define SER //servo (rudder)
-//#define ROT //rotors
-//#define GPS //gps
+#define SER //servo (rudder)
+#define ROT //rotors
+#define GPS //gps
 #define COM //compass
 #define DEBUG
 //#define DATA_PROMPT
 #define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
-#define ROTOR_PIN_1  5
+#define ROTOR_PIN_1  3
 #define ROTOR_PIN_2  6
 // lots of code borrowed from demot
-#define CMPS10_ADDRESS         0x1E    // I2C address
-#define CMPS10_HEADING_REG     0x01    // Bearing
+#define CMPS10_ADDRESS         0x60    // I2C address
+#define CMPS10_HEADING_REG     0x02    // Bearing
 #define rad2deg(x) (180/M_PI) * x
 #define deg2rad(x) x * M_PI/180
 #define NUM_OF_WAYPOINTS 8
@@ -41,8 +41,8 @@ float running_err = 0.0;
 int hdg_err = 0;
 SoftwareSerial gps_serial(11, 12);  // Creates a serial object which allows us to read serial data from pin 11 and write on 12
 struct Data {
-  uint16_t heading;
-  int8_t rudder;
+  int heading;
+  int rudder;
   float lat;
   float lon;
   long unix_time;
@@ -153,209 +153,198 @@ void orientationStuff() {
 }
 #endif
 
+byte read_i2c(int address, int _register) {
+Wire.beginTransmission(address);
+Wire.write(_register);
+Wire.endTransmission();
+Wire.requestFrom(address, 1);
+delay(50);
+return Wire.read();
+}
+
+int readCOM() {
+int high = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG) << 8;
+int low = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG+1);
+return (high + low) / 10;
+}
+
 // merged compass-readings and rudder-turning because it will make later things simpler
 #ifdef COM
 int turningStuff() {
-  byte msb;
-
-  Wire.beginTransmission(CMPS10_ADDRESS); // Start communicating with the CMPS10 compasss
-  Wire.write(CMPS10_HEADING_REG); // Send the address of the register that we want to read
-  Wire.endTransmission();
-  Wire.requestFrom(CMPS10_ADDRESS, 2); // Request six bytes of data from the CMPS10 compass,
-  // if you look at the data sheet you will see that the
-  // data we want is stored in a 6 byte register
-
-  unsigned long start = millis(); // This times us out, so if the wire comes lose we won't
-  // get stuck here forever
-  while (millis() < start + 1000) {
-    while (Wire.available() < 1); // Busy wait while there is no byte to receive
-    msb = Wire.read();
-  }
-    // get a heading in radians
-    data.heading = ((float)msb * 360) / 255;
 
     // return the heading in degrees, 57.29582 = 180 / PI
+  // get a heading in radians
+   data.heading = readCOM();
+  // return the heading in degrees, 57.29582 = 180 / PI
 
-    hdg_err = get_hdg_diff(wp_hdg, data.heading);
+  hdg_err = get_hdg_diff(wp_hdg, data.heading);
 
-    running_err = running_err + (float)hdg_err;
+  running_err = running_err + (float)hdg_err;
 
-    // clip the running error to -4000..4000
-    if (running_err > 4000)
-      running_err = 4000;
-    else if (running_err < -4000)
-      running_err = -4000;
+  // clip the running error to -4000..4000
+  if (running_err > 4000)
+    running_err = 4000;
+  else if (running_err < -4000)
+    running_err = -4000;
 
-    // apply a geometric decay to the running error
-    running_err = running_err * 0.9;
+  // apply a geometric decay to the running error
+  running_err = running_err * 0.9;
 
-    // apply PI control
-    data.rudder = (int) round((pgain * (float)hdg_err) + (igain * running_err));
-    if (data.rudder < -5)
-    {
-      data.rudder = -5;
-    }
-    else if (data.rudder > 5)
-    {
-      data.rudder = 5;
-    }
-    //turn the rudder after the math stuff
+  // apply PI control
+  data.rudder = (int) round((pgain * (float)hdg_err) + (igain * running_err));
+  if (data.rudder < -5)
+  {
+    data.rudder = -5;
+  }
+  else if (data.rudder > 5)
+  {
+    data.rudder = 5;
+  }
+  //turn the rudder after the math stuff
 #ifdef SER
-    rudderServo.writeMicroseconds(1500 + (data.rudder * 100));
+  rudderServo.writeMicroseconds(1500 + (data.rudder * 100));
 #endif
-  }
+}
 #endif
 
-  // end code borrowed from demot
+// end code borrowed from demot
 
-  int relhed(){
-    int relhed = get_hdg_diff(wp_hdg, data.heading);
-    return relhed;
-  }
+int relhed() {
+  int relhed = get_hdg_diff(wp_hdg, data.heading);
+  return relhed;
+}
 
-  void differentialSteering() { //TODO: this definitely needs testing...
-    //slow down rotors if they are being counterproductive, otherwise leave them on
-    int rel = relhed();
-    unsigned char rudpow = 255;
-    if ((rel > 25) and (rel < 155)) {
-      rudpow = rudpow / 2;
-      analogWrite(ROTOR_PIN_1, rudpow); //low
-    }
-    else {
-      rudpow = 255;
-      analogWrite(ROTOR_PIN_1, rudpow); //high
-    };
-    if ((rel < 335) and (rel > 155)) {
-      rudpow = rudpow / 2;
-      analogWrite(ROTOR_PIN_2, rudpow); //low
-    }
-    else {
-      rudpow = 255;
-      analogWrite(ROTOR_PIN_2, rudpow); //high
-    }
+void differentialSteering() { //TODO: this definitely needs testing...
+  //slow down rotors if they are being counterproductive, otherwise leave them on
+  int rel = relhed();
+  unsigned char rud1pow = 255;
+  unsigned char rud2pow = 255;
+  analogWrite(ROTOR_PIN_1, rud1pow);
+  analogWrite(ROTOR_PIN_2, rud2pow); 
+}
 
-  }
+void saveStatus() {
 
-  void saveStatus() {
+}
 
-  }
+//////////////////////////////////////////////////////////////////////////
+///
+/// Helper functions
+///
+//////////////////////////////////////////////////////////////////////////
 
-  //////////////////////////////////////////////////////////////////////////
-  ///
-  /// Helper functions
-  ///
-  //////////////////////////////////////////////////////////////////////////
+/**
+ * A helper function for setting a register in a I2C device.
+ */
+void i2c_write(byte address, byte reg, byte value)
+{
+  Wire.beginTransmission(address);
+  Wire.write(address);
+  Wire.write(value);
+  Wire.endTransmission();
+}
 
-  /**
-   * A helper function for setting a register in a I2C device.
-   */
-  void i2c_write(byte address, byte reg, byte value)
-  {
-    Wire.beginTransmission(address);
-    Wire.write(address);
-    Wire.write(value);
-    Wire.endTransmission();
-  }
+//////////////////////////////////////////////////////////////////////////
+///
+/// Arduino functions
+///
+//////////////////////////////////////////////////////////////////////////
 
-  //////////////////////////////////////////////////////////////////////////
-  ///
-  /// Arduino functions
-  ///
-  //////////////////////////////////////////////////////////////////////////
-
-  void setup()
-  {
-    //connect rudder (borrowing alot of code from demot again :P)
-    rudderServo.attach(5, 1060, 1920); // Attach, with the output limited (TODO, look up if these values can be improved)
-    rudderServo.writeMicroseconds(1500); // Centre it roughly
-    Serial.begin(9600); //makes no difference on 32u4
-    gps_serial.begin(4800); // setups serial communications for the GPS
-    unsigned long last_gps_read = 0;
-    Wire.begin();
-    pinMode(ROTOR_PIN_1, OUTPUT);
-    pinMode(ROTOR_PIN_2, OUTPUT);
+void setup()
+{
+  //connect rudder (borrowing alot of code from demot again :P)
+  rudderServo.attach(5, 1060, 1920); // Attach, with the output limited (TODO, look up if these values can be improved)
+  rudderServo.writeMicroseconds(1500); // Centre it roughly
+  Serial.begin(9600); //makes no difference on 32u4
+  gps_serial.begin(4800); // setups serial communications for the GPS
+  unsigned long last_gps_read = 0;
+  Wire.begin();
+  pinMode(ROTOR_PIN_1, OUTPUT);
+  pinMode(ROTOR_PIN_2, OUTPUT);
 
 #ifdef DATA_PROMPT
-    for (int i = 0; i < NUM_OF_WAYPOINTS; i++) {
-      Serial.print("Please enter the latitude of waypoint");
-      Serial.println(i + 1);
-      while (!Serial.available()) {
-        //doesn't continue until serial is available
-      }
-
-      wp_lats[i] = Serial.parseFloat();
-      Serial.println();
-      Serial.print("Please enter the longitude of waypoint");
-      Serial.println(i + 1);
-      while (!Serial.available()) {
-        //doesn't continue until serial is available
-        ;
-      }
-
-      wp_lons[i] = Serial.parseFloat();
+  for (int i = 0; i < NUM_OF_WAYPOINTS; i++) {
+    Serial.print("Please enter the latitude of waypoint");
+    Serial.println(i + 1);
+    while (!Serial.available()) {
+      //doesn't continue until serial is available
     }
+
+    wp_lats[i] = Serial.parseFloat();
+    Serial.println();
+    Serial.print("Please enter the longitude of waypoint");
+    Serial.println(i + 1);
+    while (!Serial.available()) {
+      //doesn't continue until serial is available
+      ;
+    }
+
+    wp_lons[i] = Serial.parseFloat();
+  }
 #endif
 
 #ifdef DATA_PREWRITTEN
-    wp_lats[0] = 0.0;
-    wp_lons[0] = 0.0;
+  wp_lats[0] = 0.0;
+  wp_lons[0] = 0.0;
 
-    wp_lats[1] = 0.0;
-    wp_lons[1] = 0.0;
+  wp_lats[1] = 0.0;
+  wp_lons[1] = 0.0;
 
-    wp_lats[2] = 0.0;
-    wp_lons[2] = 0.0;
+  wp_lats[2] = 0.0;
+  wp_lons[2] = 0.0;
 
-    wp_lats[3] = 0.0;
-    wp_lons[3] = 0.0;
+  wp_lats[3] = 0.0;
+  wp_lons[3] = 0.0;
 
-    wp_lats[4] = 0.0;
-    wp_lons[4] = 0.0;
+  wp_lats[4] = 0.0;
+  wp_lons[4] = 0.0;
 
-    wp_lats[5] = 0.0;
-    wp_lons[5] = 0.0;
+  wp_lats[5] = 0.0;
+  wp_lons[5] = 0.0;
 
-    wp_lats[6] = 0.0;
-    wp_lons[6] = 0.0;
+  wp_lats[6] = 0.0;
+  wp_lons[6] = 0.0;
 
-    wp_lats[7] = 0.0;
-    wp_lons[7] = 0.0;
+  wp_lats[7] = 0.0;
+  wp_lons[7] = 0.0;
 #endif
 
 
 
-  }
+}
 
-  void loop()
-  {
+void loop()
+{
 #ifdef GPS
-    orientationStuff();
+  orientationStuff();
 #endif
 #ifdef COM
-    data.heading = turningStuff();
+  turningStuff();
 #endif
 #ifdef ROT
-    differentialSteering();
+//  differentialSteering();
+  analogWrite(ROTOR_PIN_1, 255);
+  analogWrite(ROTOR_PIN_2, 255); 
 #endif
-    saveStatus();
+  saveStatus();
 #ifdef DEBUG
-    delay(900);
+  delay(900);
 #else
-    delay(600);
+  delay(600);
 #endif
 
 #ifdef DEBUG
-    Serial.println();
-    Serial.print("heading to waypoint: ");
-    Serial.println(wp_hdg);
-    delay(300);
-    Serial.print("vessel heading: ");
-    Serial.println(data.heading);
-    delay(300);
-    Serial.print("distance to waypoint: ");
-    Serial.println(wp_dist);
+  Serial.println();
+  Serial.print("heading to waypoint: ");
+  Serial.println(wp_hdg);
+  delay(300);
+  Serial.print("vessel heading: ");
+  Serial.println(data.heading);
+  delay(300);
+  Serial.print("distance to waypoint: ");
+  Serial.println(wp_dist);
 #endif
 
-  }
+}
 
 
