@@ -8,6 +8,7 @@
 #include "Time.h"
 #include "SoftwareSerial.h"
 #include "EEPROM.h"
+#include "software_uart.c"
 
 #define SER //servo (rudder)
 #define ROT //rotors
