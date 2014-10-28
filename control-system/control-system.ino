@@ -17,8 +17,9 @@
 #define DEBUG
 //#define DATA_PROMPT
 #define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
-#define ROTOR_PIN_1  3
+#define ROTOR_PIN_1  5
 #define ROTOR_PIN_2  6
+#define SERVO_PIN 9
 // lots of code borrowed from demot
 #define CMPS10_ADDRESS         0x60    // I2C address
 #define CMPS10_HEADING_REG     0x02    // Bearing
@@ -26,6 +27,7 @@
 #define deg2rad(x) x * M_PI/180
 #define NUM_OF_WAYPOINTS 8
 #define WP_THRESHOLD 10
+#define DRAG_RACE_HEADING 120
 float wp_lats[NUM_OF_WAYPOINTS];
 float wp_lons[NUM_OF_WAYPOINTS];
 
@@ -40,6 +42,8 @@ float igain = 0.01;
 float pgain = 0.1;
 float running_err = 0.0;
 int hdg_err = 0;
+unsigned char rud1pow = 255;
+unsigned char rud2pow = 255;
 SoftwareSerial gps_serial(11, 12);  // Creates a serial object which allows us to read serial data from pin 11 and write on 12
 struct Data {
   int heading;
@@ -49,23 +53,6 @@ struct Data {
   long unix_time;
 }
 data;
-
-
-//////////////////////////////////////////////////////////////////////////////////////////
-// Utility function that keeps angles betweeen 0 and 360
-int mod(int value) {
-  int newValue;
-  if (value < 0) {
-    newValue = value + 360;
-  }
-  else if (value >= 360) {
-    newValue = value - 360;
-  }
-  else {
-    newValue = value;
-  }
-  return newValue;
-}
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Utility function that calculates difference between two headings taking wrap around
@@ -91,7 +78,6 @@ int get_hdg_diff(int heading1, int heading2)
 }
 
 #ifdef GPS
-// got rid of a bunch of debug stuff so this is likely to be buggy and broken :)
 void readGPS() {
   unsigned long fix_age = 9999, time, date;
 
@@ -129,12 +115,19 @@ void readGPS() {
 
 }
 
+void headingcalc() {
+  #ifndef GPS
+  wp_hdg = (int)DRAG_RACE_HEADING;
+  #else
+  wp_hdg = (int) gps.course_to(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
+  wp_dist = gps.distance_between(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
+  #endif
+}
 
 void orientationStuff() {
   //blatant pull of waypoint logic from demot makes me sad... but it looks like it works fine...
-  wp_hdg = (int) gps.course_to(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
-  wp_dist = gps.distance_between(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
 
+  headingcalc();
   // Move onto next waypoint if we are inside the waypoint's radius
   if (wp_dist < WP_THRESHOLD)
   {
@@ -147,8 +140,7 @@ void orientationStuff() {
     else //reached new waypoint
     {
       // Work out the new heading and distance
-      wp_hdg = (int) gps.course_to(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
-      wp_dist = gps.distance_between(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
+      headingcalc();
     }
   }
 }
@@ -164,9 +156,11 @@ return Wire.read();
 }
 
 int readCOM() {
+sei();
 int high = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG) << 8;
 int low = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG+1);
 return (high + low) / 10;
+cli();
 }
 
 // merged compass-readings and rudder-turning because it will make later things simpler
@@ -203,7 +197,9 @@ int turningStuff() {
   }
   //turn the rudder after the math stuff
 #ifdef SER
+  sei();
   rudderServo.writeMicroseconds(1500 + (data.rudder * 100));
+  cli();
 #endif
 }
 #endif
@@ -218,32 +214,10 @@ int relhed() {
 void differentialSteering() { //TODO: this definitely needs testing...
   //slow down rotors if they are being counterproductive, otherwise leave them on
   int rel = relhed();
-  unsigned char rud1pow = 255;
-  unsigned char rud2pow = 255;
   analogWrite(ROTOR_PIN_1, rud1pow);
   analogWrite(ROTOR_PIN_2, rud2pow); 
 }
 
-void saveStatus() {
-
-}
-
-//////////////////////////////////////////////////////////////////////////
-///
-/// Helper functions
-///
-//////////////////////////////////////////////////////////////////////////
-
-/**
- * A helper function for setting a register in a I2C device.
- */
-void i2c_write(byte address, byte reg, byte value)
-{
-  Wire.beginTransmission(address);
-  Wire.write(address);
-  Wire.write(value);
-  Wire.endTransmission();
-}
 
 //////////////////////////////////////////////////////////////////////////
 ///
@@ -254,7 +228,7 @@ void i2c_write(byte address, byte reg, byte value)
 void setup()
 {
   //connect rudder (borrowing alot of code from demot again :P)
-  rudderServo.attach(5, 1060, 1920); // Attach, with the output limited (TODO, look up if these values can be improved)
+  rudderServo.attach(SERVO_PIN, 1060, 1920); // Attach, with the output limited (TODO, look up if these values can be improved)
   rudderServo.writeMicroseconds(1500); // Centre it roughly
   Serial.begin(9600); //makes no difference on 32u4
   gps_serial.begin(4800); // setups serial communications for the GPS
@@ -310,24 +284,23 @@ void setup()
   wp_lons[7] = 0.0;
 #endif
 
-
+cli();
 
 }
 
 void loop()
 {
 #ifdef GPS
+  sei();
   orientationStuff();
+  cli();
 #endif
 #ifdef COM
   turningStuff();
 #endif
 #ifdef ROT
-//  differentialSteering();
-  analogWrite(ROTOR_PIN_1, 255);
-  analogWrite(ROTOR_PIN_2, 255); 
+  differentialSteering();
 #endif
-  saveStatus();
 #ifdef DEBUG
   delay(900);
 #else
