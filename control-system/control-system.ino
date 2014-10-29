@@ -214,8 +214,14 @@ int relhed() {
 void differentialSteering() { //TODO: this definitely needs testing...
   //slow down rotors if they are being counterproductive, otherwise leave them on
   int rel = relhed();
-  analogWrite(ROTOR_PIN_1, rud1pow);
-  analogWrite(ROTOR_PIN_2, rud2pow); 
+  if((rel < 30) or (rel > 330)){
+    rud1pow = 255;    //if you are within 30 degrees of facing target, full speed.
+    rud2pow = 255;
+  } else if(rel > 180) { //if you are heading left
+  rud1pow = 128;  // slow down rudder 1
+  } else if(rel < 180) { //if you are heading right
+  rud2pow = 128;  // ^^ the same, rudder 2
+  }
 }
 
 
