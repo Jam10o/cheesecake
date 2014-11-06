@@ -6,15 +6,13 @@
 #include "math.h"
 #include "TinyGPS.h"
 #include "Time.h"
-#include "SoftwareSerial.h"
-#include "EEPROM.h"
 #include "software_uart.c"
 
 #define SER //servo (rudder)
 #define ROT //rotors
 #define GPS //gps
 #define COM //compass
-#define DEBUG
+//#define DEBUG
 //#define DATA_PROMPT
 #define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
 #define ROTOR_PIN_1  5
@@ -30,7 +28,6 @@
 #define DRAG_RACE_HEADING 120
 float wp_lats[NUM_OF_WAYPOINTS];
 float wp_lons[NUM_OF_WAYPOINTS];
-
 TinyGPS gps;
 //
 
@@ -44,7 +41,6 @@ float running_err = 0.0;
 int hdg_err = 0;
 unsigned char rud1pow = 255;
 unsigned char rud2pow = 255;
-SoftwareSerial gps_serial(11, 12);  // Creates a serial object which allows us to read serial data from pin 11 and write on 12
 struct Data {
   int heading;
   int rudder;
@@ -88,9 +84,8 @@ void readGPS() {
   while (millis() < start + 2000)
   {
     // Here we just pass the data over to TinyGPS if we have any
-    if (gps_serial.available())
+    if (char c = uart_rx(11,4800))
     {
-      int c = gps_serial.read();
       gps.encode(c);
       // Prints out the characters coming in
       // Each NMEA string ends in a new line character
@@ -126,7 +121,6 @@ void headingcalc() {
 
 void orientationStuff() {
   //blatant pull of waypoint logic from demot makes me sad... but it looks like it works fine...
-
   headingcalc();
   // Move onto next waypoint if we are inside the waypoint's radius
   if (wp_dist < WP_THRESHOLD)
@@ -156,11 +150,9 @@ return Wire.read();
 }
 
 int readCOM() {
-sei();
 int high = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG) << 8;
 int low = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG+1);
 return (high + low) / 10;
-cli();
 }
 
 // merged compass-readings and rudder-turning because it will make later things simpler
@@ -197,9 +189,7 @@ int turningStuff() {
   }
   //turn the rudder after the math stuff
 #ifdef SER
-  sei();
   rudderServo.writeMicroseconds(1500 + (data.rudder * 100));
-  cli();
 #endif
 }
 #endif
@@ -222,6 +212,8 @@ void differentialSteering() { //TODO: this definitely needs testing...
   } else if(rel < 180) { //if you are heading right
   rud2pow = 128;  // ^^ the same, rudder 2
   }
+  analogWrite(ROTOR_PIN_1, rud1pow);
+  analogWrite(ROTOR_PIN_2, rud2pow);
 }
 
 
@@ -233,15 +225,17 @@ void differentialSteering() { //TODO: this definitely needs testing...
 
 void setup()
 {
+  Serial.begin(9600);
   //connect rudder (borrowing alot of code from demot again :P)
-  rudderServo.attach(SERVO_PIN, 1060, 1920); // Attach, with the output limited (TODO, look up if these values can be improved)
+  rudderServo.attach(SERVO_PIN, 0, 3600); // Attach, with the output limited (TODO, look up if these values can be improved)
   rudderServo.writeMicroseconds(1500); // Centre it roughly
-  Serial.begin(9600); //makes no difference on 32u4
-  gps_serial.begin(4800); // setups serial communications for the GPS
+   //makes no difference on 32u4
   unsigned long last_gps_read = 0;
   Wire.begin();
+  Serial.println("i2c works");
   pinMode(ROTOR_PIN_1, OUTPUT);
   pinMode(ROTOR_PIN_2, OUTPUT);
+  pinMode(11, INPUT);
 
 #ifdef DATA_PROMPT
   for (int i = 0; i < NUM_OF_WAYPOINTS; i++) {
@@ -290,37 +284,36 @@ void setup()
   wp_lons[7] = 0.0;
 #endif
 
-cli();
 
 }
 
 void loop()
 {
 #ifdef GPS
-  sei();
   orientationStuff();
-  cli();
 #endif
 #ifdef COM
+  delay(500);
   turningStuff();
+  readGPS();
 #endif
 #ifdef ROT
   differentialSteering();
 #endif
 #ifdef DEBUG
-  delay(900);
+ // delay(900);
 #else
-  delay(600);
+//  delay(600);
 #endif
 
 #ifdef DEBUG
   Serial.println();
   Serial.print("heading to waypoint: ");
   Serial.println(wp_hdg);
-  delay(300);
+  //delay(300);
   Serial.print("vessel heading: ");
   Serial.println(data.heading);
-  delay(300);
+ // delay(300);
   Serial.print("distance to waypoint: ");
   Serial.println(wp_dist);
 #endif
