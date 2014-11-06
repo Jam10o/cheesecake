@@ -10,9 +10,9 @@
 
 #define SER //servo (rudder)
 #define ROT //rotors
-#define GPS //gps
+//#define GPS //gps
 #define COM //compass
-//#define DEBUG
+#define DEBUG
 //#define DATA_PROMPT
 #define DATA_PREWRITTEN //only use one of these at a time (not none), either prewrite or prompt for coordinates on startup
 #define ROTOR_PIN_1  5
@@ -114,6 +114,7 @@ void headingcalc() {
   #ifndef GPS
   wp_hdg = (int)DRAG_RACE_HEADING;
   #else
+  readGPS();
   wp_hdg = (int) gps.course_to(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
   wp_dist = gps.distance_between(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
   #endif
@@ -295,7 +296,6 @@ void loop()
 #ifdef COM
   delay(500);
   turningStuff();
-  readGPS();
 #endif
 #ifdef ROT
   differentialSteering();
