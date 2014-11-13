@@ -10,7 +10,7 @@
 
 #define SER //servo (rudder)
 #define ROT //rotors
-//#define GPS //gps
+#define GPS //gps
 #define COM //compass
 #define DEBUG
 //#define DATA_PROMPT
@@ -28,6 +28,7 @@
 #define DRAG_RACE_HEADING 120
 float wp_lats[NUM_OF_WAYPOINTS];
 float wp_lons[NUM_OF_WAYPOINTS];
+#define GPSPIN 11
 TinyGPS gps;
 //
 
@@ -46,18 +47,17 @@ struct Data {
   int rudder;
   float lat;
   float lon;
-  long unix_time;
 }
 data;
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Utility function that calculates difference between two headings taking wrap around
 // into account
-int get_hdg_diff(int heading1, int heading2)
+int get_hdg_diff(int heading1)
 {
   int result;
 
-  result = heading1 - heading2;
+  result = heading1 - data.heading;
 
   if (result < -180)
   {
@@ -67,15 +67,15 @@ int get_hdg_diff(int heading1, int heading2)
 
   if (result > 180)
   {
-    result = 0 - (360 - result);
+    result = result - 360;
+    return result;
   }
 
-  return result;
 }
 
 #ifdef GPS
 void readGPS() {
-  unsigned long fix_age = 9999, time, date;
+  unsigned long fix_age = 9999;
 
   //make sure the GPS has a fix, this might cause a wait the first time, but it should
   // be quick any subsequent time
@@ -97,27 +97,19 @@ void readGPS() {
 
 
     // Now we ask TinyGPS for the data and store it outselves
-    gps.get_datetime(&date, &time, &fix_age);
     gps.f_get_position(&data.lat, &data.lon, &fix_age);
   }
-
-  int year;
-  byte month, day, hour, min, sec;
-  unsigned long age;
-  gps.crack_datetime(&year, &month, &day, &hour, &min, &sec, NULL, &age);
-  setTime(hour, min, sec, day, month, year);
-
-
 }
 
+#endif
+
 void headingcalc() {
-  #ifndef GPS
-  wp_hdg = (int)DRAG_RACE_HEADING;
-  #else
+  wp_hdg = DRAG_RACE_HEADING;
+#ifdef GPS
   readGPS();
   wp_hdg = (int) gps.course_to(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
   wp_dist = gps.distance_between(data.lat, data.lon, wp_lats[wp_num], wp_lons[wp_num]);
-  #endif
+#endif
 }
 
 void orientationStuff() {
@@ -139,79 +131,63 @@ void orientationStuff() {
     }
   }
 }
-#endif
 
 byte read_i2c(int address, int _register) {
-Wire.beginTransmission(address);
-Wire.write(_register);
-Wire.endTransmission();
-Wire.requestFrom(address, 1);
-delay(50);
-return Wire.read();
+  Wire.beginTransmission(address);
+  Wire.write(_register);
+  Wire.endTransmission();
+  Wire.requestFrom(address, 1);
+  delay(50);
+  return Wire.read();
 }
 
-int readCOM() {
-int high = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG) << 8;
-int low = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG+1);
-return (high + low) / 10;
+int wrap(unsigned int deg){
+  deg = deg + 180;
+  if(deg > 360){
+    deg = deg - 360;
+  }
+  return deg;
 }
+  
+int readCOM(){
+  unsigned int high = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG) << 8;
+  unsigned int low = read_i2c(CMPS10_ADDRESS, CMPS10_HEADING_REG+1);
+  return wrap((high + low)/10);
+}
+
 
 // merged compass-readings and rudder-turning because it will make later things simpler
 #ifdef COM
-int turningStuff() {
 
-    // return the heading in degrees, 57.29582 = 180 / PI
-  // get a heading in radians
-   data.heading = readCOM();
-  // return the heading in degrees, 57.29582 = 180 / PI
+void turningStuff() {
 
-  hdg_err = get_hdg_diff(wp_hdg, data.heading);
 
-  running_err = running_err + (float)hdg_err;
-
-  // clip the running error to -4000..4000
-  if (running_err > 4000)
-    running_err = 4000;
-  else if (running_err < -4000)
-    running_err = -4000;
-
-  // apply a geometric decay to the running error
-  running_err = running_err * 0.9;
-
+ 
+  data.heading = readCOM();
+#ifdef SER  
   // apply PI control
-  data.rudder = (int) round((pgain * (float)hdg_err) + (igain * running_err));
-  if (data.rudder < -5)
-  {
-    data.rudder = -5;
-  }
-  else if (data.rudder > 5)
-  {
-    data.rudder = 5;
-  }
+  data.rudder = get_hdg_diff(wp_hdg);
   //turn the rudder after the math stuff
-#ifdef SER
-  rudderServo.writeMicroseconds(1500 + (data.rudder * 100));
+
+  rudderServo.writeMicroseconds(1200 + (data.rudder * 4));
 #endif
 }
 #endif
 
 // end code borrowed from demot
 
-int relhed() {
-  int relhed = get_hdg_diff(wp_hdg, data.heading);
-  return relhed;
-}
-
 void differentialSteering() { //TODO: this definitely needs testing...
   //slow down rotors if they are being counterproductive, otherwise leave them on
-  int rel = relhed();
-  if((rel < 30) or (rel > 330)){
+  int rel = get_hdg_diff(wp_hdg);
+  if((rel > -15) && (rel < 15)){
     rud1pow = 255;    //if you are within 30 degrees of facing target, full speed.
     rud2pow = 255;
-  } else if(rel > 180) { //if you are heading left
-  rud1pow = 128;  // slow down rudder 1
-  } else if(rel < 180) { //if you are heading right
-  rud2pow = 128;  // ^^ the same, rudder 2
+  } 
+  else if(rel > 0) { //if you are heading left
+    rud1pow = 128;  // slow down rudder 1
+  } 
+  else if(rel < 0) { //if you are heading right
+    rud2pow = 128;  // ^^ the same, rudder 2
   }
   analogWrite(ROTOR_PIN_1, rud1pow);
   analogWrite(ROTOR_PIN_2, rud2pow);
@@ -228,15 +204,15 @@ void setup()
 {
   Serial.begin(9600);
   //connect rudder (borrowing alot of code from demot again :P)
-  rudderServo.attach(SERVO_PIN, 0, 3600); // Attach, with the output limited (TODO, look up if these values can be improved)
-  rudderServo.writeMicroseconds(1500); // Centre it roughly
-   //makes no difference on 32u4
+  rudderServo.attach(SERVO_PIN,200,2250); // Attach, with the output limited (TODO, look up if these values can be improved)
+  rudderServo.write(90); // Centre it roughly
+  //makes no difference on 32u4
   unsigned long last_gps_read = 0;
   Wire.begin();
   Serial.println("i2c works");
   pinMode(ROTOR_PIN_1, OUTPUT);
   pinMode(ROTOR_PIN_2, OUTPUT);
-  pinMode(11, INPUT);
+  pinMode(GPSPIN, INPUT);
 
 #ifdef DATA_PROMPT
   for (int i = 0; i < NUM_OF_WAYPOINTS; i++) {
@@ -290,34 +266,34 @@ void setup()
 
 void loop()
 {
-#ifdef GPS
   orientationStuff();
-#endif
 #ifdef COM
-  delay(500);
   turningStuff();
 #endif
 #ifdef ROT
   differentialSteering();
 #endif
 #ifdef DEBUG
- // delay(900);
+  // delay(900);
 #else
-//  delay(600);
+  //  delay(600);
 #endif
 
 #ifdef DEBUG
   Serial.println();
   Serial.print("heading to waypoint: ");
+  Serial.println(get_hdg_diff(wp_hdg));
   Serial.println(wp_hdg);
   //delay(300);
   Serial.print("vessel heading: ");
   Serial.println(data.heading);
- // delay(300);
+  // delay(300);
   Serial.print("distance to waypoint: ");
   Serial.println(wp_dist);
+  Serial.println(data.rudder);  
 #endif
 
 }
+
 
 
